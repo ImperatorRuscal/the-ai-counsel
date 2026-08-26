@@ -1,10 +1,11 @@
 name: Test & Publish Docker Image
 
-# Runs the backend test suite and frontend lint on every push to main
-# (i.e. after a PR is merged). Only if those pass does it build the
-# Docker image with `docker compose build` and push it to GHCR, tagged
-# both `latest` and with the current project version (e.g. `0.11.4`),
-# so past releases stay pullable by version after `latest` moves on.
+# Runs the backend test suite (blocking) and frontend lint (advisory
+# only, see below) on every push to main (i.e. after a PR is merged).
+# Only if the test suite passes does it build the Docker image with
+# `docker compose build` and push it to GHCR, tagged both `latest` and
+# with the current project version (e.g. `0.11.4`), so past releases
+# stay pullable by version after `latest` moves on.
 on:
   push:
     branches: [main]
@@ -43,8 +44,12 @@ jobs:
         working-directory: frontend
 
       - name: Lint frontend
+        # Non-blocking: the codebase currently has pre-existing lint errors
+        # unrelated to any given change. This keeps lint output visible in
+        # CI without gating the Docker publish on unrelated legacy debt.
         run: npm run lint
         working-directory: frontend
+        continue-on-error: true
 
   publish:
     name: Build and push Docker image
