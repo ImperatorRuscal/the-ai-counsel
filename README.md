@@ -251,7 +251,7 @@ Some provider/model combinations only accept their default temperature. The app 
 - **Import & Export** — Backup and share your settings and prompts (admin export can include the credential store; see [`docs/CREDENTIALS.md`](docs/CREDENTIALS.md))
 - **Per-request Model Overrides** — Use different models for individual requests without changing global config
 - **One-shot API** — `POST /api/ask` for scripts and MCP agents; each completed run is saved to the UI and returns a `conversation_id`
-- **Docker Deployment** — Single-container production deployment via `docker compose`
+- **Docker Deployment** — Single-container production deployment; pull the prebuilt image from GHCR or build from source with `docker compose`
 
 ---
 
@@ -298,12 +298,12 @@ Then open **http://localhost:5173** in your browser.
 ### Docker / VPS Deployment
 
 ```bash
-docker compose up -d --build
+docker run -d --restart unless-stopped -p 8001:8001 -v ./data:/app/data ghcr.io/jacob-bd/the-ai-counsel:latest
 ```
 
 Then open **http://YOUR_SERVER_IP:8001**. Conversations and settings persist to `./data` automatically.
 
-For Ollama integration, reverse proxy setup, environment variables, and upgrade instructions, see **[docs/DOCKER.md](docs/DOCKER.md)**.
+Building from source (e.g. for local changes) is still supported via `docker compose up -d --build`. For Ollama integration, reverse proxy setup, environment variables, and upgrade instructions, see **[docs/DOCKER.md](docs/DOCKER.md)**.
 
 > **Coming from LLM Council Plus?** See the **[Migration Guide](docs/MIGRATION.md)** for step-by-step upgrade instructions. Copy your `data/` directory; secrets migrate into `credentials.json` on first launch (see [`docs/CREDENTIALS.md`](docs/CREDENTIALS.md)).
 

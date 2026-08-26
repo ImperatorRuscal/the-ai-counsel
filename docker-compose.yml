@@ -1,5 +1,6 @@
 services:
   the-ai-counsel:
+    image: the-ai-counsel
     build: .
     ports:
       - "${PORT:-8001}:8001"

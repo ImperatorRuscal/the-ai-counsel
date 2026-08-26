@@ -6,15 +6,34 @@ This guide covers running The AI Counsel as a single Docker container — suitab
 
 ## Quick Start
 
+Pull the prebuilt image from GitHub Container Registry — no build step, no clone required:
+
+```bash
+mkdir -p data
+docker run -d --restart unless-stopped --name the-ai-counsel \
+  -p 8001:8001 -v ./data:/app/data \
+  ghcr.io/jacob-bd/the-ai-counsel:latest
+```
+
+Then open **http://localhost:8001** and configure your API keys in Settings.
+
+Every push to `main` that passes the test suite publishes a fresh `:latest` image, plus a copy tagged with that release's version (e.g. `ghcr.io/jacob-bd/the-ai-counsel:0.11.4`) so you can pin to, or roll back to, a specific release instead of always tracking `latest`.
+
+> **One-time setup for maintainers:** GHCR creates a package as **private** the first time a workflow pushes to it. Until someone makes it public, the `docker pull`/`docker run` command above fails for anyone else with `denied: requested access to the resource is denied`. After the `docker-publish.yml` workflow's first successful run, go to the package on GitHub (your profile or org → **Packages** → `the-ai-counsel`) → **Package settings** → and either set visibility to **Public**, or link the package to this repository so its collaborators inherit access. This is a one-time step; it does not need to be repeated on later pushes.
+
+### Build from source instead
+
+If you're modifying the code, want to build for an architecture without a published image, or just prefer building locally:
+
 ```bash
 git clone https://github.com/jacob-bd/the-ai-counsel.git
 cd the-ai-counsel
 docker compose up -d --build
 ```
 
-Then open **http://localhost:8001** and configure your API keys in Settings.
-
 The first build takes a few minutes (Python deps + frontend compile). Subsequent builds reuse the cache and are much faster.
+
+The rest of this guide uses `docker compose` commands (`logs`, `exec`, restarts) for consistency with that setup. If you're running the prebuilt image via `docker run` instead, swap `docker compose <cmd>` for `docker <cmd> the-ai-counsel` (the `--name` given above), e.g. `docker logs -f the-ai-counsel` instead of `docker compose logs -f`.
 
 ---
 
@@ -47,8 +66,8 @@ This covers:
 
 **Your data survives:**
 - Container restarts
-- Image rebuilds (`docker compose up -d --build`)
-- `docker compose down` and back up
+- Image upgrades, whether rebuilt (`docker compose up -d --build`) or re-pulled (`docker pull` + recreate, see [Upgrading](#upgrading))
+- `docker compose down` and back up, or `docker stop`/`docker rm` and back up
 
 **Your data is lost only if you delete `./data/` on the host.** Never do this unless you intend to wipe everything.
 
@@ -152,7 +171,19 @@ Settings export/import/reset are admin endpoints because settings exports includ
 
 ## Upgrading
 
-Pull the latest code and rebuild. Your data is untouched.
+**Prebuilt image:** pull the new `:latest` and recreate the container. Your data (mounted at `./data`) is untouched.
+
+```bash
+docker pull ghcr.io/jacob-bd/the-ai-counsel:latest
+docker stop the-ai-counsel && docker rm the-ai-counsel
+docker run -d --restart unless-stopped --name the-ai-counsel \
+  -p 8001:8001 -v ./data:/app/data \
+  ghcr.io/jacob-bd/the-ai-counsel:latest
+```
+
+To pin to a known-good release instead of always tracking `latest`, use a version tag (e.g. `ghcr.io/jacob-bd/the-ai-counsel:0.11.4`) in place of `:latest` above.
+
+**Built from source:** pull the latest code and rebuild.
 
 ```bash
 git pull
@@ -225,10 +256,10 @@ If you're running an older image, fix it manually:
 
 ```bash
 chmod 777 ./data
-docker compose restart
+docker compose restart   # or: docker restart the-ai-counsel
 ```
 
-Rebuilding from the latest image (`docker compose up -d --build`) fixes this permanently — the entrypoint now corrects ownership automatically on every startup.
+Upgrading to the latest image (see [Upgrading](#upgrading)) fixes this permanently — the entrypoint now corrects ownership automatically on every startup.
 
 ### Streaming responses don't work behind nginx
 

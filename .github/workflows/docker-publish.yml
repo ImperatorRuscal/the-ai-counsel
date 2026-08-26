@@ -1,0 +1,88 @@
+name: Test & Publish Docker Image
+
+# Runs the backend test suite and frontend lint on every push to main
+# (i.e. after a PR is merged). Only if those pass does it build the
+# Docker image with `docker compose build` and push it to GHCR, tagged
+# both `latest` and with the current project version (e.g. `0.11.4`),
+# so past releases stay pullable by version after `latest` moves on.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: Run test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install backend dependencies
+        run: uv sync --frozen
+
+      - name: Run backend test suite
+        run: uv run pytest
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Lint frontend
+        run: npm run lint
+        working-directory: frontend
+
+  publish:
+    name: Build and push Docker image
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute lowercase image repository
+        id: image
+        run: |
+          echo "repo=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Read project version from pyproject.toml
+        id: version
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image with docker compose
+        run: docker compose build
+
+      - name: Tag image for GHCR
+        run: |
+          docker tag the-ai-counsel:latest ${{ steps.image.outputs.repo }}:latest
+          docker tag the-ai-counsel:latest ${{ steps.image.outputs.repo }}:${{ steps.version.outputs.value }}
+
+      - name: Push image to GHCR
+        run: |
+          docker push ${{ steps.image.outputs.repo }}:latest
+          docker push ${{ steps.image.outputs.repo }}:${{ steps.version.outputs.value }}
