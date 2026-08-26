@@ -412,6 +412,24 @@ export const api = {
     return response.json();
   },
 
+  async createPersona(fields) {
+    const response = await fetch(`${API_BASE}/api/personas`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields),
+    });
+    if (!response.ok) throw new Error('Failed to create advisor');
+    return response.json();
+  },
+
+  async deletePersona(personaId) {
+    const response = await fetch(`${API_BASE}/api/personas/${personaId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error('Failed to delete advisor');
+    return response.json();
+  },
+
   async extractDocuments(files) {
     const formData = new FormData();
     files.forEach((file) => formData.append('files', file));

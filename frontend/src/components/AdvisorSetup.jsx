@@ -140,8 +140,10 @@ export default function AdvisorSetup({
   const [modelAssignments, setModelAssignments] = useState({});
   const [rounds, setRounds] = useState(3);
   const [editingPersona, setEditingPersona] = useState(null);
+  const [isCreatingPersona, setIsCreatingPersona] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', role: '', description: '', system_prompt: '', avatar_emoji: '' });
   const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState(null);
   const [searchProvider, setSearchProvider] = useState(null);
   const [availableSearchProviders, setAvailableSearchProviders] = useState([{ id: 'duckduckgo', name: 'DuckDuckGo' }]);
   const [searchPopoverOpen, setSearchPopoverOpen] = useState(false);
@@ -531,8 +533,12 @@ export default function AdvisorSetup({
     return null;
   }, [selectedPersonaIds, personas, modelMode, chosenModel, modelAssignments]);
 
+  const BLANK_PERSONA_FORM = { name: '', role: '', description: '', system_prompt: '', avatar_emoji: '' };
+
   const openEditModal = (e, persona) => {
     e.stopPropagation();
+    setIsCreatingPersona(false);
+    setEditError(null);
     setEditingPersona(persona);
     setEditForm({
       name: persona.name,
@@ -543,32 +549,71 @@ export default function AdvisorSetup({
     });
   };
 
+  const openCreateModal = () => {
+    setIsCreatingPersona(true);
+    setEditError(null);
+    setEditingPersona({ avatar_emoji: '🧑‍💼', is_custom: true });
+    setEditForm(BLANK_PERSONA_FORM);
+  };
+
   const closeEditModal = () => {
     setEditingPersona(null);
+    setIsCreatingPersona(false);
     setEditSaving(false);
+    setEditError(null);
   };
 
   const runEditAction = async (apiFn, errorMsg) => {
     if (!editingPersona || editSaving) return;
     setEditSaving(true);
+    setEditError(null);
     try {
-      const result = await apiFn(editingPersona.id);
-      setPersonas((prev) => prev.map((p) => p.id === result.id ? result : p));
+      const result = await apiFn();
+      if (result) {
+        setPersonas((prev) => prev.map((p) => p.id === result.id ? result : p));
+      }
       closeEditModal();
     } catch (err) {
       console.error(errorMsg, err);
+      setEditError(err.message || errorMsg);
       setEditSaving(false);
     }
   };
 
-  const handleEditSave = () => runEditAction(
-    (id) => api.updatePersona(id, editForm),
-    'Failed to save persona:'
-  );
+  const handleEditSave = () => {
+    if (isCreatingPersona) {
+      if (!editForm.name.trim() || !editForm.role.trim() || !editForm.system_prompt.trim()) {
+        setEditError('Name, role, and system prompt are required.');
+        return;
+      }
+      return runEditAction(
+        async () => {
+          const created = await api.createPersona(editForm);
+          setPersonas((prev) => [...prev, created]);
+          return null;
+        },
+        'Failed to create advisor:'
+      );
+    }
+    return runEditAction(
+      () => api.updatePersona(editingPersona.id, editForm),
+      'Failed to save persona:'
+    );
+  };
 
   const handleEditReset = () => runEditAction(
-    api.resetPersona,
+    () => api.resetPersona(editingPersona.id),
     'Failed to reset persona:'
+  );
+
+  const handleEditDelete = () => runEditAction(
+    async () => {
+      await api.deletePersona(editingPersona.id);
+      setPersonas((prev) => prev.filter((p) => p.id !== editingPersona.id));
+      setSelectedPersonaIds((prev) => prev.filter((id) => id !== editingPersona.id));
+      return null;
+    },
+    'Failed to delete advisor:'
   );
 
   const canStart =
@@ -975,6 +1020,15 @@ export default function AdvisorSetup({
                     </div>
                   );
                 })}
+                <button
+                  type="button"
+                  className="advisor-setup__persona-card advisor-setup__persona-card--add"
+                  onClick={openCreateModal}
+                >
+                  <span className="advisor-setup__persona-add-icon">＋</span>
+                  <span className="advisor-setup__persona-name">Add Advisor</span>
+                  <span className="advisor-setup__persona-desc">Create a custom persona with your own system prompt</span>
+                </button>
               </div>
             )}
           </div>
@@ -1064,8 +1118,8 @@ export default function AdvisorSetup({
         <div className="advisor-setup__edit-overlay" onClick={closeEditModal}>
           <div className="advisor-setup__edit-modal" onClick={(e) => e.stopPropagation()}>
             <div className="advisor-setup__edit-header">
-              <span className="advisor-setup__edit-emoji">{editingPersona.avatar_emoji}</span>
-              <span className="advisor-setup__edit-title">Edit Persona</span>
+              <span className="advisor-setup__edit-emoji">{editForm.avatar_emoji || editingPersona.avatar_emoji}</span>
+              <span className="advisor-setup__edit-title">{isCreatingPersona ? 'New Advisor' : 'Edit Persona'}</span>
               <button type="button" className="advisor-setup__edit-close" onClick={closeEditModal} aria-label="Close">✕</button>
             </div>
 
@@ -1094,6 +1148,7 @@ export default function AdvisorSetup({
                   className="advisor-setup__edit-input"
                   value={editForm.name}
                   onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder={isCreatingPersona ? 'e.g. The Futurist' : ''}
                 />
               </label>
 
@@ -1104,6 +1159,7 @@ export default function AdvisorSetup({
                   className="advisor-setup__edit-input"
                   value={editForm.role}
                   onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}
+                  placeholder={isCreatingPersona ? 'e.g. Trend Forecaster' : ''}
                 />
               </label>
 
@@ -1114,6 +1170,7 @@ export default function AdvisorSetup({
                   rows={2}
                   value={editForm.description}
                   onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder={isCreatingPersona ? 'Shown on the advisor card in the gallery' : ''}
                 />
               </label>
 
@@ -1124,12 +1181,17 @@ export default function AdvisorSetup({
                   rows={7}
                   value={editForm.system_prompt}
                   onChange={(e) => setEditForm((f) => ({ ...f, system_prompt: e.target.value }))}
+                  placeholder={isCreatingPersona ? 'You are The Futurist. Your job is to...' : ''}
                 />
               </label>
+
+              {editError && (
+                <p className="advisor-setup__edit-error">{editError}</p>
+              )}
             </div>
 
             <div className="advisor-setup__edit-footer">
-              {editingPersona.is_customized && (
+              {!isCreatingPersona && editingPersona.is_customized && !editingPersona.is_custom && (
                 <button
                   type="button"
                   className="advisor-setup__edit-btn advisor-setup__edit-btn--reset"
@@ -1137,6 +1199,16 @@ export default function AdvisorSetup({
                   disabled={editSaving}
                 >
                   Reset to Default
+                </button>
+              )}
+              {!isCreatingPersona && editingPersona.is_custom && (
+                <button
+                  type="button"
+                  className="advisor-setup__edit-btn advisor-setup__edit-btn--delete"
+                  onClick={handleEditDelete}
+                  disabled={editSaving}
+                >
+                  Delete Advisor
                 </button>
               )}
               <div className="advisor-setup__edit-footer-right">
@@ -1154,7 +1226,7 @@ export default function AdvisorSetup({
                   onClick={handleEditSave}
                   disabled={editSaving}
                 >
-                  {editSaving ? 'Saving…' : 'Save'}
+                  {editSaving ? 'Saving…' : isCreatingPersona ? 'Create Advisor' : 'Save'}
                 </button>
               </div>
             </div>

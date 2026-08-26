@@ -47,7 +47,15 @@ from .credentials.relay_import import discover_relay_ai_credentials, import_rela
 from .credentials.upgrade import ensure_credentials_upgraded
 from .oauth.sessions import disconnect_oauth, get_oauth_session_status, start_oauth_session
 from .prompts import VALID_RESPONSE_LANGUAGES, RESPONSE_LANGUAGE_DEFAULT
-from .personas import get_all_personas, save_persona_override, delete_persona_override, get_persona
+from .personas import (
+    get_all_personas,
+    save_persona_override,
+    delete_persona_override,
+    get_persona,
+    create_persona,
+    update_custom_persona,
+    delete_persona,
+)
 from .advisors import run_debate
 from .debate import run_iterative_debate, MAX_DEBATE_ROUNDS
 from .documents import (
@@ -1205,22 +1213,59 @@ class PersonaOverrideRequest(BaseModel):
     avatar_emoji: Optional[str] = None
 
 
+class PersonaCreateRequest(BaseModel):
+    name: str
+    role: str
+    description: str
+    system_prompt: str
+    avatar_emoji: Optional[str] = None
+
+
+@app.post("/api/personas")
+async def add_persona(body: PersonaCreateRequest):
+    """Create a brand-new custom advisor persona."""
+    if not body.name.strip() or not body.role.strip() or not body.system_prompt.strip():
+        raise HTTPException(status_code=400, detail="Name, role, and system prompt are required")
+    created = create_persona(body.model_dump(exclude_none=True))
+    return created.model_dump()
+
+
 @app.patch("/api/personas/{persona_id}")
 async def update_persona(persona_id: str, body: PersonaOverrideRequest):
-    """Save user overrides for a persona."""
-    if not get_persona(persona_id):
+    """Save user overrides for a persona, or edit a custom persona in place."""
+    persona = get_persona(persona_id)
+    if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
-    updated = save_persona_override(persona_id, body.model_dump(exclude_none=True))
+    fields = body.model_dump(exclude_none=True)
+    if persona.is_custom:
+        updated = update_custom_persona(persona_id, fields)
+    else:
+        updated = save_persona_override(persona_id, fields)
     return updated.model_dump()
 
 
 @app.delete("/api/personas/{persona_id}/override")
 async def reset_persona(persona_id: str):
     """Remove user overrides and restore persona defaults."""
-    if not get_persona(persona_id):
+    persona = get_persona(persona_id)
+    if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
+    if persona.is_custom:
+        raise HTTPException(status_code=400, detail="Custom advisors have no default to reset to; delete instead")
     restored = delete_persona_override(persona_id)
     return restored.model_dump()
+
+
+@app.delete("/api/personas/{persona_id}")
+async def remove_persona(persona_id: str):
+    """Permanently delete a custom advisor persona."""
+    persona = get_persona(persona_id)
+    if not persona:
+        raise HTTPException(status_code=404, detail="Persona not found")
+    if not persona.is_custom:
+        raise HTTPException(status_code=400, detail="Built-in advisors cannot be deleted")
+    delete_persona(persona_id)
+    return {"deleted": persona_id}
 
 
 @app.post("/api/conversations/{conversation_id}/debate/stream")

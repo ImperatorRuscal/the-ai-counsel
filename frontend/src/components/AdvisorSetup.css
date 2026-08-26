@@ -243,6 +243,28 @@
   opacity: 1;
 }
 
+/* ── Add Advisor Card ── */
+.advisor-setup__persona-card--add {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border-style: dashed;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.advisor-setup__persona-card--add:hover {
+  border-color: rgba(168, 85, 247, 0.4);
+  color: var(--text-primary);
+}
+
+.advisor-setup__persona-add-icon {
+  font-size: calc(24px * var(--font-scale));
+  line-height: 1;
+  margin-bottom: 4px;
+  color: #c084fc;
+}
+
 /* ── Customized Badge ── */
 .advisor-setup__persona-custom-badge {
   position: absolute;
@@ -457,6 +479,24 @@
 
 .advisor-setup__edit-btn--reset:hover:not(:disabled) {
   background: rgba(251, 191, 36, 0.1);
+}
+
+.advisor-setup__edit-btn--delete {
+  background: transparent;
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+  font-size: calc(12px * var(--font-scale));
+}
+
+.advisor-setup__edit-btn--delete:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.advisor-setup__edit-error {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: calc(12px * var(--font-scale));
+  color: #fca5a5;
 }
 
 .advisor-setup__persona-emoji {
