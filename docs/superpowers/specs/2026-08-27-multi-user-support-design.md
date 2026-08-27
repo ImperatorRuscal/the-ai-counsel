@@ -37,7 +37,7 @@ class Profile(BaseModel):
     created_at: str     # ISO 8601
 ```
 
-Stored as a flat list in `data/profiles.json`. Implement slugify + collision-suffix id generation directly in `backend/profiles.py` (no shared helper — as of this branch, `backend/personas.py` on `main` has no equivalent custom-entity creation logic to reuse; a similar helper exists only on the separate, still-unmerged `feat/add-advisors` branch).
+Stored as a flat list in `data/profiles.json`. Implement slugify + collision-suffix id generation directly in `backend/profiles.py`, as its own small self-contained helper, rather than importing `backend/personas.py`'s equivalent (`_slugify`/`_unique_custom_id`, added by the now-merged `feat/add-advisors` work). Those are underscore-prefixed internals of the persona module, not a published shared API — duplicating ~15 lines here is preferable to coupling this feature's correctness to another feature's private implementation details.
 
 ### Conversation isolation
 
@@ -79,7 +79,7 @@ The one-shot `/api/ask` endpoint and the MCP server accept an **optional** `prof
 ## Frontend UX
 
 - New gate on app load: read the active profile id from `localStorage`. If present and still resolves via `GET /api/profiles`, skip straight to the existing landing page with that profile active. If missing or stale (e.g. the profile was deleted from another browser), show the new profile picker.
-- **Profile picker**: a card grid — one selectable card per profile (avatar emoji, name, color-accented border), styled consistently with the existing persona cards in `AdvisorSetup.jsx`/`.css` (`advisor-setup__persona-card`) — plus a dashed "+ Add Profile" tile using the same visual treatment (border, hover state) as those cards, introduced fresh in this feature's own CSS. If `GET /api/conversations/unclaimed-summary` reports `count > 0` and this browser has never stored an active profile before, also show an "Import N existing conversations" affordance that triggers the claim endpoint right after the next profile is picked/created.
+- **Profile picker**: a card grid — one selectable card per profile (avatar emoji, name, color-accented border), visually similar to the existing persona cards in `AdvisorSetup.jsx`/`.css` (`advisor-setup__persona-card`, `advisor-setup__persona-card--add`) for consistency with the app's established card-grid pattern — but with its own fresh CSS in this feature's own file, not a shared/imported stylesheet, so this feature has no build-time dependency on the advisor UI. If `GET /api/conversations/unclaimed-summary` reports `count > 0` and this browser has never stored an active profile before, also show an "Import N existing conversations" affordance that triggers the claim endpoint right after the next profile is picked/created.
 - **Switching profiles**: a small control in `Sidebar.jsx` shows the active profile's avatar/name and offers "Switch Profile," which clears the stored active profile id and returns to the picker (no server-side logout needed, since there's no server-side session).
 - **Deleting your own profile**: a confirmation modal states how many private conversations will be deleted, then calls `DELETE /api/profiles/{id}`, clears `localStorage`, and returns to the picker.
 

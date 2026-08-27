@@ -645,11 +645,11 @@ git commit -m "feat: add optional profile_id scoping to conversation storage"
 
 **Files:**
 - Modify: `backend/main.py`
-  - Import line ~46 (add `Header` to the fastapi import, add `from .profiles import get_all_profiles, get_profile, create_profile, delete_profile`)
-  - `AskRequest` (~line 387): add `profile_id` field
-  - New dependency function (place near `_require_admin`, ~line 305)
-  - New route group (place between `POST /api/conversations` at line ~666 and `GET /api/conversations/{conversation_id}` at line ~669 — the unclaimed-summary route MUST be registered before the `{conversation_id}` route or FastAPI will match `unclaimed-summary` as a `conversation_id` path parameter instead)
-  - Updated: `list_conversations` (655), `create_conversation` (661), `get_conversation` (669), `delete_conversation` (678), `get_conversation_progress` (687), `send_message_stream` (730), `send_debate_message_stream` (957), `start_debate_stream` (1226), `send_message_sync` (1360), `ask_oneshot` (1422)
+  - Import line ~6 (add `Header` to the fastapi import), and near line 61 (add `from .profiles import get_all_profiles, get_profile, create_profile, delete_profile` right after the existing multi-line `.personas` import)
+  - `AskRequest` (~line 395): add `profile_id` field
+  - New dependency function (place near `_require_admin`, ~line 313)
+  - New route group (place between `POST /api/conversations` at line ~669 and `GET /api/conversations/{conversation_id}` at line ~677 — the unclaimed-summary route MUST be registered before the `{conversation_id}` route or FastAPI will match `unclaimed-summary` as a `conversation_id` path parameter instead)
+  - Updated: `list_conversations` (663), `create_conversation` (669), `get_conversation` (677), `delete_conversation` (686), `get_conversation_progress` (695), `send_message_stream` (738), `send_debate_message_stream` (965), `start_debate_stream` (1271), `send_message_sync` (1405), `ask_oneshot` (1467)
   - New routes: `GET /api/profiles`, `POST /api/profiles`, `DELETE /api/profiles/{profile_id}`, `POST /api/profiles/{profile_id}/claim-unclaimed`
 - Test: `backend/tests/test_profile_endpoints.py`
 
@@ -782,14 +782,22 @@ In `backend/main.py`, update the fastapi import line:
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 ```
 
-Add the profiles import alongside the personas import (near line 46):
+Add the profiles import right after the existing multi-line `.personas` import block (which ends around line 61 with a closing `)`):
 
 ```python
-from .personas import get_all_personas, save_persona_override, delete_persona_override, get_persona
+from .personas import (
+    get_all_personas,
+    save_persona_override,
+    delete_persona_override,
+    get_persona,
+    create_persona,
+    update_custom_persona,
+    delete_persona,
+)
 from .profiles import get_all_profiles, get_profile, create_profile, delete_profile
 ```
 
-Add the dependency function near `_require_admin` (around line 305):
+Add the dependency function near `_require_admin` (around line 313):
 
 ```python
 def get_active_profile_id(x_profile_id: Optional[str] = Header(None)) -> Optional[str]:
@@ -805,7 +813,7 @@ def get_active_profile_id(x_profile_id: Optional[str] = Header(None)) -> Optiona
     return x_profile_id
 ```
 
-Add `profile_id: Optional[str] = None` to `AskRequest` (around line 387):
+Add `profile_id: Optional[str] = None` to `AskRequest` (around line 395):
 
 ```python
 class AskRequest(BaseModel):
@@ -818,7 +826,7 @@ class AskRequest(BaseModel):
     profile_id: Optional[str] = None
 ```
 
-Replace the conversation CRUD endpoints (lines 655-684), inserting the new profile routes and the unclaimed-summary route **before** the `{conversation_id}` GET route:
+Replace the conversation CRUD endpoints (lines 663-692), inserting the new profile routes and the unclaimed-summary route **before** the `{conversation_id}` GET route:
 
 ```python
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
@@ -925,7 +933,7 @@ async def get_conversation_progress(
 
 For the three message/debate streaming endpoints and the sync message endpoint, apply the same mechanical substitution — add the dependency parameter and pass it through to `storage.get_conversation`:
 
-`send_message_stream` (line 730-735):
+`send_message_stream` (line 738-743):
 ```python
 @app.post("/api/conversations/{conversation_id}/message/stream")
 async def send_message_stream(
@@ -940,7 +948,7 @@ async def send_message_stream(
         raise HTTPException(status_code=404, detail="Conversation not found")
 ```
 
-`send_debate_message_stream` (line 957-962):
+`send_debate_message_stream` (line 965-970):
 ```python
 @app.post("/api/conversations/{conversation_id}/message/debate")
 async def send_debate_message_stream(
@@ -955,7 +963,7 @@ async def send_debate_message_stream(
         raise HTTPException(status_code=404, detail="Conversation not found")
 ```
 
-`start_debate_stream` (line 1226-1231):
+`start_debate_stream` (line 1271-1276):
 ```python
 @app.post("/api/conversations/{conversation_id}/debate/stream")
 async def start_debate_stream(
@@ -970,7 +978,7 @@ async def start_debate_stream(
         raise HTTPException(status_code=404, detail="Conversation not found")
 ```
 
-`send_message_sync` (line 1360-1365):
+`send_message_sync` (line 1405-1410):
 ```python
 @app.post("/api/conversations/{conversation_id}/message")
 async def send_message_sync(
@@ -984,7 +992,7 @@ async def send_message_sync(
         raise HTTPException(status_code=404, detail="Conversation not found")
 ```
 
-In `ask_oneshot` (line 1422-1458), pass `profile_id` through to conversation creation:
+In `ask_oneshot` (line 1467-1503), pass `profile_id` through to conversation creation:
 
 ```python
 @app.post("/api/ask")
@@ -1155,7 +1163,7 @@ Update the 9 conversation call sites to attach `_profileHeaders()`:
   },
 ```
 
-For the three streaming methods — `sendDebateStream` (line ~429, hits `/debate/stream`), `sendMessageStream` (line ~475, hits `/message/stream`), and `streamDebateMessage` (line ~522, hits `/message/debate`) — add `..._profileHeaders()` into each one's existing `headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }` object, e.g.:
+For the three streaming methods — `sendDebateStream` (line ~447, hits `/debate/stream`), `sendMessageStream` (line ~493, hits `/message/stream`), and `streamDebateMessage` (line ~540, hits `/message/debate`) — add `..._profileHeaders()` into each one's existing `headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }` object, e.g.:
 
 ```javascript
     const response = await fetch(
