@@ -23,8 +23,12 @@ export default function Sidebar({
   onClose,
   onGoHome,
   dateFormat = 'auto',
+  activeProfile,
+  onSwitchProfile,
+  onDeleteProfile,
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(null);
+  const [confirmingProfileDelete, setConfirmingProfileDelete] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredConversations = conversations.filter(conv => {
@@ -58,6 +62,11 @@ export default function Sidebar({
     setConfirmingDelete(null);
   };
 
+  const handleProfileDeleteConfirm = () => {
+    setConfirmingProfileDelete(false);
+    onDeleteProfile();
+  };
+
   return (
     <>
       {/* Mobile backdrop */}
@@ -83,6 +92,37 @@ export default function Sidebar({
           ⚙️
         </button>
       </div>
+
+      {activeProfile && (
+        <div className="sidebar-profile">
+          <span className="sidebar-profile__emoji">{activeProfile.avatar_emoji}</span>
+          <span className="sidebar-profile__name">{activeProfile.name}</span>
+          <button
+            type="button"
+            className="sidebar-profile__switch-btn"
+            onClick={onSwitchProfile}
+            title="Switch profile"
+          >
+            Switch
+          </button>
+          {confirmingProfileDelete ? (
+            <span className="sidebar-profile__delete-confirm">
+              Delete profile and {conversations.length} conversation{conversations.length === 1 ? '' : 's'}?
+              <button type="button" onClick={handleProfileDeleteConfirm} title="Confirm">✓</button>
+              <button type="button" onClick={() => setConfirmingProfileDelete(false)} title="Cancel">✕</button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="sidebar-profile__delete-btn"
+              onClick={() => setConfirmingProfileDelete(true)}
+              title="Delete profile"
+            >
+              🗑️
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Mode Actions */}
       <div className="sidebar-actions">
