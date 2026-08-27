@@ -17,6 +17,13 @@ const getApiBase = () => {
 
 const API_BASE = getApiBase();
 
+import { getActiveProfileId } from './profileSession';
+
+function _profileHeaders() {
+  const profileId = getActiveProfileId();
+  return profileId ? { 'X-Profile-Id': profileId } : {};
+}
+
 export function buildAvailableSearchProviders(settings) {
   const providers = [{ id: 'duckduckgo', name: 'DuckDuckGo' }];
   if (settings.serper_api_key_set) providers.push({ id: 'serper', name: 'Serper (Google)' });
@@ -62,7 +69,9 @@ export const api = {
    * List all conversations.
    */
   async listConversations() {
-    const response = await fetch(`${API_BASE}/api/conversations`);
+    const response = await fetch(`${API_BASE}/api/conversations`, {
+      headers: _profileHeaders(),
+    });
     if (!response.ok) {
       throw new Error('Failed to list conversations');
     }
@@ -77,6 +86,7 @@ export const api = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ..._profileHeaders(),
       },
       body: JSON.stringify(options),
     });
@@ -91,7 +101,8 @@ export const api = {
    */
   async getConversation(conversationId) {
     const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}`
+      `${API_BASE}/api/conversations/${conversationId}`,
+      { headers: _profileHeaders() }
     );
     if (!response.ok) {
       throw new Error('Failed to get conversation');
@@ -105,7 +116,8 @@ export const api = {
    */
   async getConversationProgress(conversationId) {
     const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/progress`
+      `${API_BASE}/api/conversations/${conversationId}/progress`,
+      { headers: _profileHeaders() }
     );
     if (!response.ok) {
       throw new Error('Failed to get conversation progress');
@@ -119,7 +131,7 @@ export const api = {
   async deleteConversation(conversationId) {
     const response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}`,
-      { method: 'DELETE' }
+      { method: 'DELETE', headers: _profileHeaders() }
     );
     if (!response.ok) {
       throw new Error('Failed to delete conversation');
@@ -137,12 +149,77 @@ export const api = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ..._profileHeaders(),
         },
         body: JSON.stringify({ content, web_search: webSearch }),
       }
     );
     if (!response.ok) {
       throw new Error('Failed to send message');
+    }
+    return response.json();
+  },
+
+  /**
+   * List all profiles for the picker.
+   */
+  async getProfiles() {
+    const response = await fetch(`${API_BASE}/api/profiles`);
+    if (!response.ok) {
+      throw new Error('Failed to list profiles');
+    }
+    return response.json();
+  },
+
+  /**
+   * Create a new profile.
+   */
+  async createProfile(name, avatarEmoji) {
+    const response = await fetch(`${API_BASE}/api/profiles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, avatar_emoji: avatarEmoji || null }),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to create profile');
+    }
+    return response.json();
+  },
+
+  /**
+   * Delete a profile (can only delete your own — send its own id as the active profile).
+   */
+  async deleteProfile(profileId) {
+    const response = await fetch(`${API_BASE}/api/profiles/${profileId}`, {
+      method: 'DELETE',
+      headers: _profileHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to delete profile');
+    }
+    return response.json();
+  },
+
+  /**
+   * Count of conversations with no owning profile (pre-upgrade or created via /api/ask/MCP).
+   */
+  async getUnclaimedConversationsSummary() {
+    const response = await fetch(`${API_BASE}/api/conversations/unclaimed-summary`);
+    if (!response.ok) {
+      throw new Error('Failed to get unclaimed conversation summary');
+    }
+    return response.json();
+  },
+
+  /**
+   * Attach every currently-unclaimed conversation to profileId. Idempotent.
+   */
+  async claimUnclaimedConversations(profileId) {
+    const response = await fetch(`${API_BASE}/api/profiles/${profileId}/claim-unclaimed`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to claim unclaimed conversations');
     }
     return response.json();
   },
@@ -465,6 +542,7 @@ export const api = {
         headers: {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-cache',
+          ..._profileHeaders(),
         },
         body: JSON.stringify(body),
         signal,
@@ -520,6 +598,7 @@ export const api = {
         headers: {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-cache',
+          ..._profileHeaders(),
         },
         body: JSON.stringify(body),
         signal,
@@ -569,6 +648,7 @@ export const api = {
         headers: {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-cache',
+          ..._profileHeaders(),
         },
         body: JSON.stringify(body),
         signal,
