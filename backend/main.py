@@ -1569,6 +1569,9 @@ async def ask_oneshot(body: AskRequest):
     if not models:
         raise HTTPException(status_code=400, detail="At least one model is required")
 
+    if body.profile_id and not get_profile(body.profile_id):
+        raise HTTPException(status_code=400, detail="Unknown profile")
+
     preflight_body = SendMessageRequest(
         content=body.content,
         execution_mode=body.execution_mode,

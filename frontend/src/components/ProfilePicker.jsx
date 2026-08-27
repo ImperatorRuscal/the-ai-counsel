@@ -9,7 +9,7 @@ export default function ProfilePicker({ onProfileChosen }) {
   const [addingProfile, setAddingProfile] = useState(false);
   const [newName, setNewName] = useState('');
   const [newEmoji, setNewEmoji] = useState('');
-  const [importExisting, setImportExisting] = useState(true);
+  const [importExisting, setImportExisting] = useState(false);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
 

@@ -2,6 +2,8 @@
  * API client for The AI Counsel backend.
  */
 
+import { getActiveProfileId } from './profileSession';
+
 // Dynamically determine API base URL based on current hostname
 // This allows the app to work on both localhost and network IPs
 const getApiBase = () => {
@@ -16,8 +18,6 @@ const getApiBase = () => {
 };
 
 const API_BASE = getApiBase();
-
-import { getActiveProfileId } from './profileSession';
 
 function _profileHeaders() {
   const profileId = getActiveProfileId();

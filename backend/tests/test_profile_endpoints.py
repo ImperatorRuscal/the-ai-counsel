@@ -105,3 +105,39 @@ def test_unclaimed_summary_and_claim_flow(client):
     assert client.get("/api/conversations/unclaimed-summary").json()["count"] == 0
     scoped = client.get("/api/conversations", headers={"X-Profile-Id": sarah["id"]})
     assert len(scoped.json()) == 1
+
+
+def test_ask_oneshot_rejects_unknown_profile_id(client):
+    response = client.post(
+        "/api/ask",
+        json={"content": "hello", "profile_id": "ghost"},
+    )
+    assert response.status_code == 400
+
+
+def test_send_message_scoped_to_other_profile_is_404(client):
+    sarah = client.post("/api/profiles", json={"name": "Sarah"}).json()
+    tom = client.post("/api/profiles", json={"name": "Tom"}).json()
+    created = client.post(
+        "/api/conversations", json={"mode": "council"}, headers={"X-Profile-Id": sarah["id"]}
+    ).json()
+
+    response = client.post(
+        f"/api/conversations/{created['id']}/message",
+        json={"content": "hello"},
+        headers={"X-Profile-Id": tom["id"]},
+    )
+    assert response.status_code == 404
+
+
+def test_delete_profile_cascades_to_its_conversations(client):
+    sarah = client.post("/api/profiles", json={"name": "Sarah"}).json()
+    created = client.post(
+        "/api/conversations", json={"mode": "council"}, headers={"X-Profile-Id": sarah["id"]}
+    ).json()
+
+    response = client.delete(f"/api/profiles/{sarah['id']}", headers={"X-Profile-Id": sarah["id"]})
+    assert response.status_code == 200
+
+    assert client.get(f"/api/conversations/{created['id']}").status_code == 404
+    assert client.get("/api/conversations").json() == []

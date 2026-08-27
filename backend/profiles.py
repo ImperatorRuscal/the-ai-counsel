@@ -53,7 +53,13 @@ def _load_profiles() -> List[Dict[str, Any]]:
     try:
         _profiles_cache = json.loads(_PROFILES_FILE.read_text(encoding="utf-8"))
     except Exception:
-        logger.warning("Failed to parse %s; starting with an empty profile list", _PROFILES_FILE, exc_info=True)
+        logger.warning(
+            "Failed to parse %s; starting with an empty profile list. "
+            "If a profile is created or deleted before this is fixed, "
+            "the corrupted file will be overwritten and its contents lost.",
+            _PROFILES_FILE,
+            exc_info=True,
+        )
         _profiles_cache = []
     return _profiles_cache
 
