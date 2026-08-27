@@ -53,16 +53,16 @@ Add `profile_id: Optional[str] = None` to:
 
 ### Request identity
 
-The frontend sends `X-Profile-Id: <id>` on every conversation-scoped request once a profile is active. A small FastAPI dependency in `backend/main.py`:
+The frontend sends `X-Profile-Id: <id>` on every conversation-scoped request once a profile is active. **This header is optional, not required** — a small FastAPI dependency in `backend/main.py`:
 
 ```python
-def require_profile_id(x_profile_id: str = Header(...)) -> str:
-    if not get_profile(x_profile_id):
-        raise HTTPException(400, "No active profile")
+def get_active_profile_id(x_profile_id: Optional[str] = Header(None)) -> Optional[str]:
+    if x_profile_id and not get_profile(x_profile_id):
+        raise HTTPException(400, "Unknown profile")
     return x_profile_id
 ```
 
-applied to all conversation endpoints (`/api/conversations`, `/api/conversations/{id}`, `/api/conversations/{id}/message`, `/api/conversations/{id}/debate/stream`, `/api/conversations/{id}/progress`, etc.). Settings, credentials, and persona endpoints are untouched — they never read this header, keeping the "conversations private, everything else shared" boundary enforced at the API layer, not just by convention.
+applied to all conversation endpoints (`/api/conversations`, `/api/conversations/{id}`, `/api/conversations/{id}/message`, `/api/conversations/{id}/debate/stream`, `/api/conversations/{id}/progress`, etc.). **When the header is absent, behavior is unscoped and unchanged from today** — this is required for backward compatibility with the separate `the_ai_counsel_mcp` package, whose HTTP client calls these same endpoints directly (`list_conversations()`, `get_conversation()`, `create_conversation()`) with no concept of a profile at all. Only when the header is present does it activate scoping/filtering for that request. Settings, credentials, and persona endpoints are untouched — they never read this header, keeping the "conversations private, everything else shared" boundary enforced at the API layer, not just by convention.
 
 This works uniformly across the app's SSE streaming endpoints because the frontend's `_consumeSSEStream` helper (`frontend/src/api.js`) already streams via `fetch()`, not native `EventSource` — so a custom header is not a blocker there.
 
@@ -85,8 +85,8 @@ The one-shot `/api/ask` endpoint and the MCP server accept an **optional** `prof
 
 ## Error handling and compatibility
 
-- Missing/unknown `X-Profile-Id` on a conversation endpoint → `400`. The frontend should never trigger this once a profile is active, but it protects against stale clients or direct API use.
-- Accessing another profile's conversation by ID → `404`, not `403` (don't leak existence).
+- Missing `X-Profile-Id` → unscoped, not an error (see Request Identity above — this is the MCP/scripting compatibility path). An `X-Profile-Id` that doesn't match any known profile → `400` (guards against a stale/garbage header, not a legitimate use case to silently ignore).
+- Accessing another profile's conversation by ID **while sending a valid `X-Profile-Id`** → `404`, not `403` (don't leak existence). Accessing it with no header at all is unrestricted, same as today.
 - Duplicate profile names are allowed; ids get a numeric suffix on collision, matching the existing custom-persona behavior.
 - Deleting the last remaining profile is allowed; the next load simply shows an empty picker with only the "+ Add Profile" tile, identical to first-ever run.
 - `/api/ask` and the MCP server keep working exactly as they do today for callers that never pass `profile_id` — their conversations are just unclaimed, not broken or rejected.
@@ -94,7 +94,7 @@ The one-shot `/api/ask` endpoint and the MCP server accept an **optional** `prof
 ## Testing
 
 - New `backend/tests/test_profiles.py`, mirroring the structure of `backend/tests/test_personas.py`: create/list/delete, slug collision handling, and a fixture that isolates `data/profiles.json` the same way persona tests isolate `persona_overrides.json`.
-- Extend `backend/tests/test_storage_modes.py` (or a new focused test module) to cover: list/get/delete filtering by `profile_id`, cross-profile access returning `404`, and unclaimed-conversation semantics (`profile_id: null` excluded from every profile's list, but still fetchable by ID directly).
+- Extend `backend/tests/test_storage_modes.py` (or a new focused test module) to cover: list/get/delete filtering by `profile_id` when provided, unscoped behavior when `profile_id` is omitted entirely (the MCP/`/api/ask` compatibility path — must return/affect *all* conversations regardless of owner, matching pre-feature behavior), cross-profile access returning `404` when a *different* profile_id is given, and unclaimed-conversation semantics (`profile_id: null` excluded from every profile-scoped list, but still fetchable by ID directly or via the unscoped path).
 - Cover `claim-unclaimed` idempotency: calling it twice doesn't re-touch already-claimed conversations, and calling it with no unclaimed conversations is a no-op, not an error.
 - No new frontend automated tests — matches the project's existing testing posture, where the frontend has only `npm run lint` and no test runner configured in `package.json`.
 
