@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import { api, DEFAULT_EXECUTION_MODE, buildAvailableSearchProviders } from './api';
 import { hasConfiguredProviders } from './constants/oauthProviders';
 import { applyFontSize, normalizeFontSize } from './utils/fontSize';
+import { clearActiveProfileId } from './profileSession';
 import './App.css';
 import './components/StageCopyButtons.css';
 import './ModeToggle.css';
@@ -123,7 +124,7 @@ const buildAdvisorProgressMessage = (progress, existing = {}) => {
   };
 };
 
-function App() {
+function App({ activeProfile, onSwitchProfile }) {
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
@@ -624,6 +625,15 @@ function App() {
       // Don't set to null here - let the request handler clean up
       // This prevents race conditions with rapid clicks
       setIsLoading(false);
+    }
+  };
+
+  const handleDeleteProfile = async () => {
+    try {
+      await api.deleteProfile(activeProfile.id);
+    } finally {
+      clearActiveProfileId();
+      window.location.reload();
     }
   };
 
@@ -1645,6 +1655,9 @@ function App() {
         onClose={() => setSidebarOpen(false)}
         onGoHome={() => resetAppState(null)}
         dateFormat={dateFormat}
+        activeProfile={activeProfile}
+        onSwitchProfile={onSwitchProfile}
+        onDeleteProfile={handleDeleteProfile}
       />
 
       <div className="main-area">

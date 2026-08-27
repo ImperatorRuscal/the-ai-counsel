@@ -101,8 +101,10 @@ This fixes binary incompatibilities (e.g., `@rollup/rollup-darwin-*` variants).
 | `CouncilSetup.jsx` | Inline council editor on welcome screen (members, chairman, presets; auto-save) |
 | `Settings.jsx` | 8-section settings: General, LLM API Keys, Council Config, Council Debate Config, Council System Prompts, Advisor System Prompts, Search Providers, Backup & Reset |
 | `GeneralSettings.jsx` | Date format, accessible font size, response language, and relay-ai credential import (General section) |
-| `Sidebar.jsx` | Conversation list with stacked date/time, run summaries, cumulative cost pill, sidebar search on summary text, inline delete confirmation |
+| `Sidebar.jsx` | Conversation list with stacked date/time, run summaries, cumulative cost pill, sidebar search on summary text, inline delete confirmation; profile indicator with switch/delete controls |
 | `SearchableModelSelect.jsx` | Searchable dropdown for model selection |
+| `ProfilePicker.jsx` | Netflix/Plex-style picker for choosing/creating a lightweight, password-free profile; shown on first load or after switching |
+| `ProfileGate.jsx` | Wraps `App` — resolves the stored active profile from localStorage or shows `ProfilePicker`; not itself an app screen |
 
 **Styling**: "Council Chamber" dark theme (refined Midnight Glass). CSS variables in `index.css` (`--font-display`: Syne, `--font-ui`: Plus Jakarta Sans, `--font-content`: Source Serif 4, `--font-code`: JetBrains Mono). Primary accent blue (#3b82f6), chairman gold (#fbbf24). Staggered hero/card animations; glass panels with backdrop-filter.
 
@@ -229,11 +231,25 @@ Save conversation (stage1, stage2, stage3 only)
 ### One-Shot Query (Persisted)
 ```
 POST /api/ask
-Body: {content, models?, web_search?, execution_mode?, documents?}
+Body: {content, models?, web_search?, execution_mode?, documents?, profile_id?}
 → JSON response with conversation_id; completed run appears in the UI
 ```
 Each call creates a new conversation for auditability. The endpoint remains
 one-shot: it does not load prior conversation history.
+
+### Multi-User Profiles
+
+```
+GET  /api/profiles                          — list profiles
+POST /api/profiles                          — create a profile {name, avatar_emoji?}
+DELETE /api/profiles/{id}                   — delete own profile (X-Profile-Id header must match {id})
+GET  /api/conversations/unclaimed-summary   — {count} of conversations with no owning profile
+POST /api/profiles/{id}/claim-unclaimed     — attach all unclaimed conversations to {id}
+```
+Every conversation endpoint accepts an optional `X-Profile-Id` header to scope
+it to that profile; omitting it is fully unscoped (pre-feature behavior),
+which is what the MCP server and one-shot `/api/ask` rely on. `POST /api/ask`
+also accepts an optional `profile_id` body field for the same purpose.
 
 ### Document Extraction / Uploads
 ```

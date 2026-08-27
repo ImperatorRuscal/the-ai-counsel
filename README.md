@@ -251,6 +251,7 @@ Some provider/model combinations only accept their default temperature. The app 
 - **Import & Export** — Backup and share your settings and prompts (admin export can include the credential store; see [`docs/CREDENTIALS.md`](docs/CREDENTIALS.md))
 - **Per-request Model Overrides** — Use different models for individual requests without changing global config
 - **One-shot API** — `POST /api/ask` for scripts and MCP agents; each completed run is saved to the UI and returns a `conversation_id`
+- **Multi-User Profiles** — Pick or add a lightweight named profile (no password) to keep your conversation history private from others sharing the same instance; settings, personas, and API keys stay shared across everyone
 - **Docker Deployment** — Single-container production deployment; pull the prebuilt image from GHCR or build from source with `docker compose`
 
 ---

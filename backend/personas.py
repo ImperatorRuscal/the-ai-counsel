@@ -2,11 +2,12 @@
 
 import json
 import os
-import re
 import tempfile
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
+
+from .slugify import unique_slug
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 _OVERRIDES_FILE = _DATA_DIR / "persona_overrides.json"
@@ -327,19 +328,9 @@ def _save_custom_personas(custom: Dict[str, Dict[str, Any]]) -> None:
     _custom_cache = custom
 
 
-def _slugify(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
-    return slug or "advisor"
-
-
 def _unique_custom_id(name: str, existing: Dict[str, Dict[str, Any]]) -> str:
-    base_slug = _slugify(name)
-    candidate = base_slug
-    suffix = 2
-    while candidate in _DEFAULT_MAP or candidate in existing:
-        candidate = f"{base_slug}-{suffix}"
-        suffix += 1
-    return candidate
+    existing_ids = set(_DEFAULT_MAP.keys()) | set(existing.keys())
+    return unique_slug(name, existing_ids, fallback="advisor")
 
 
 def create_persona(fields: Dict[str, Any]) -> Persona:

@@ -258,6 +258,7 @@ def _build_index_entry(
         "title": conversation.get("title", DEFAULT_CONVERSATION_TITLE),
         "mode": mode if mode is not None else infer_conversation_mode(conversation),
         "message_count": len(conversation["messages"]),
+        "profile_id": conversation.get("profile_id"),
     }
     run_summary = derive_run_summary(conversation)
     if run_summary:
@@ -328,13 +329,19 @@ def _remove_from_index(conversation_id: str):
         _save_index(new_index)
 
 
-def create_conversation(conversation_id: str, mode: str = "council") -> Dict[str, Any]:
+def create_conversation(
+    conversation_id: str,
+    mode: str = "council",
+    profile_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Create a new conversation.
 
     Args:
         conversation_id: Unique identifier for the conversation
         mode: Conversation mode — "council" or "advisors"
+        profile_id: Owning profile, or None for unclaimed (matches
+            pre-multi-user behavior; used by /api/ask and the MCP server)
 
     Returns:
         New conversation dict
@@ -346,6 +353,7 @@ def create_conversation(conversation_id: str, mode: str = "council") -> Dict[str
         "created_at": datetime.now(timezone.utc).isoformat(),
         "title": "New Conversation",
         "mode": _normalize_conversation_mode(mode),
+        "profile_id": profile_id,
         "messages": []
     }
 
@@ -360,15 +368,22 @@ def create_conversation(conversation_id: str, mode: str = "council") -> Dict[str
     return conversation
 
 
-def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
+def get_conversation(
+    conversation_id: str,
+    profile_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     """
     Load a conversation from storage.
 
     Args:
         conversation_id: Unique identifier for the conversation
+        profile_id: If given, only return the conversation when it belongs
+            to this profile (None otherwise). If omitted, unscoped — returns
+            the conversation regardless of owner (pre-multi-user behavior;
+            used by /api/ask and the MCP server).
 
     Returns:
-        Conversation dict or None if not found
+        Conversation dict or None if not found (or not owned by profile_id)
     """
     path = get_conversation_path(conversation_id)
 
@@ -377,6 +392,10 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
 
     with open(path, 'r') as f:
         conversation = json.load(f)
+
+    if profile_id is not None and conversation.get("profile_id") != profile_id:
+        return None
+
     if maybe_repair_conversation_title(conversation):
         # Save to persist the repaired title
         save_conversation(conversation)
@@ -403,24 +422,30 @@ def save_conversation(conversation: Dict[str, Any]):
     _update_index_entry(conversation, mode=conversation["mode"])
 
 
-def list_conversations() -> List[Dict[str, Any]]:
+def list_conversations(profile_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     List all conversations (metadata only).
     Uses cached index file for O(1) performance.
+
+    Args:
+        profile_id: If given, only conversations owned by this profile are
+            returned. If omitted, unscoped — returns every conversation
+            (pre-multi-user behavior; used by /api/ask and the MCP server).
 
     Returns:
         List of conversation metadata dicts
     """
     ensure_data_dir()
 
-    # Try to load from index first
     index = _load_index()
-    
-    # If index missing or invalid, rebuild it
+
     if index is None:
-        return rebuild_index()
-        
-    return index
+        index = rebuild_index()
+
+    if profile_id is None:
+        return index
+
+    return [entry for entry in index if entry.get("profile_id") == profile_id]
 
 
 def add_user_message(
@@ -582,24 +607,68 @@ def update_conversation_title(conversation_id: str, title: str):
     save_conversation(conversation)
 
 
-def delete_conversation(conversation_id: str) -> bool:
+def delete_conversation(
+    conversation_id: str,
+    profile_id: Optional[str] = None,
+) -> bool:
     """
     Delete a conversation.
 
     Args:
         conversation_id: Conversation identifier
+        profile_id: If given, only delete when owned by this profile. If
+            omitted, unscoped — deletes regardless of owner (pre-multi-user
+            behavior; used by /api/ask and the MCP server).
 
     Returns:
-        True if deleted, False if not found
+        True if deleted, False if not found (or not owned by profile_id)
     """
     path = get_conversation_path(conversation_id)
 
     if not os.path.exists(path):
         return False
 
+    if profile_id is not None:
+        with open(path, 'r') as f:
+            existing = json.load(f)
+        if existing.get("profile_id") != profile_id:
+            return False
+
     os.remove(path)
-    
+
     # Update index
     _remove_from_index(conversation_id)
-    
+
     return True
+
+
+def get_unclaimed_conversation_count() -> int:
+    """Count conversations with no owning profile (pre-existing or created via /api/ask/MCP)."""
+    ensure_data_dir()
+    index = _load_index()
+    if index is None:
+        index = rebuild_index()
+    return sum(1 for entry in index if not entry.get("profile_id"))
+
+
+def claim_unclaimed_conversations(profile_id: str) -> int:
+    """Attach every currently-unclaimed conversation to profile_id. Idempotent.
+
+    Returns the number of conversations claimed by this call.
+    """
+    ensure_data_dir()
+    index = _load_index()
+    if index is None:
+        index = rebuild_index()
+
+    claimed = 0
+    for entry in index:
+        if entry.get("profile_id"):
+            continue
+        conversation = get_conversation(entry["id"])
+        if conversation is None:
+            continue
+        conversation["profile_id"] = profile_id
+        save_conversation(conversation)
+        claimed += 1
+    return claimed

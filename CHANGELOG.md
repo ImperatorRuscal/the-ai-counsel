@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Multi-user profiles: a lightweight, password-free picker lets multiple people share one instance while keeping conversation history private per person. Settings, personas, and API keys remain shared across all profiles.
+
 ## [0.11.4] - 2026-08-13
 
 ### Fixed

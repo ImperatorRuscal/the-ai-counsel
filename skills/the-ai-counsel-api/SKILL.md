@@ -126,6 +126,7 @@ Use this table **only when MCP tools are unavailable** or the operation has no M
 | List all models | GET | `/api/models` + `/api/models/direct` + `/api/ollama/tags` + `/api/custom-endpoint/models` |
 | List conversations | GET | `/api/conversations` |
 | Create conversation | POST | `/api/conversations` |
+| Count unclaimed conversations | GET | `/api/conversations/unclaimed-summary` |
 | Get conversation | GET | `/api/conversations/{id}` |
 | **Get live run progress** | **GET** | **`/api/conversations/{id}/progress`** |
 | Extract uploaded documents | POST | `/api/documents/extract` |
@@ -137,11 +138,17 @@ Use this table **only when MCP tools are unavailable** or the operation has no M
 | List all personas | GET | `/api/personas` |
 | Update a persona | PATCH | `/api/personas/{id}` |
 | Reset persona to defaults | DELETE | `/api/personas/{id}/override` |
+| List profiles | GET | `/api/profiles` |
+| Create profile | POST | `/api/profiles` |
+| Delete own profile | DELETE | `/api/profiles/{id}` |
+| Claim unclaimed conversations into a profile | POST | `/api/profiles/{id}/claim-unclaimed` |
 | Test a provider | POST | `/api/settings/test-provider` |
 | Export settings (backup) | GET | `/api/settings/export` |
 | Import settings (restore) | POST | `/api/settings/import` |
 | Reset settings to defaults | POST | `/api/settings/reset` |
 | Disconnect all providers (keys + OAuth) | POST | `/api/settings/disconnect-all-providers` |
+
+**Multi-user profiles (optional):** Every conversation endpoint above accepts an optional `X-Profile-Id` header. Send it to scope the request to that profile's conversations (list/get/delete become profile-filtered, cross-profile access 404s). Omit it entirely for unscoped access — this is the default and is what MCP tools and this skill's own REST examples use; nothing here requires a profile to function. `POST /api/ask` also accepts an optional `profile_id` field in its JSON body for the same purpose (it has no header to attach to, since it's a one-shot call, not a browser session).
 
 **Model ID prefix format:**
 ```
@@ -337,6 +344,7 @@ async def ask(query, model, web_search=False, base_url="http://localhost:8001"):
 | `web_search` | boolean | No | `false` | Enable web search context |
 | `execution_mode` | string | No | `"chat_only"` | `chat_only`, `chat_ranking`, or `full` |
 | `documents` | array | No | `[]` | Extracted document payloads from `/api/documents/extract` or `/api/documents/extract-json` |
+| `profile_id` | string | No | none (unscoped) | Attach the created conversation to this profile |
 
 **Response shapes by mode:**
 
