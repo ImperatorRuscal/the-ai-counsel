@@ -15,16 +15,177 @@
 - `X-Profile-Id` is **optional** on every conversation endpoint. Missing header = unscoped, unchanged from pre-feature behavior. This is required for `the_ai_counsel_mcp` and `/api/ask` compatibility — do not make it required anywhere.
 - Profile creation is self-service (no admin gate). Profile deletion is self-service and self-scoped only (a profile can delete only itself).
 - `docs/superpowers/` is gitignored in this repo despite one earlier tracked spec/plan pair — commit files under it with `git add -f`.
+- Profile id generation reuses the shared `backend/slugify.py` helper (Task 1) — do not add a second private slugify implementation in `backend/profiles.py`.
 
 ---
 
-### Task 1: Backend — Profile model and CRUD store
+### Task 1: Backend — shared slug/id helper, extracted from personas.py
+
+Added because `backend/personas.py` (from the now-merged `feat/add-advisors` work) already has near-identical private slug/collision-suffix logic (`_slugify`, `_unique_custom_id`) for creating custom advisor persona ids. Task 2 needs the same logic for profile ids. Rather than duplicate it, extract a small shared module both `personas.py` and the new `profiles.py` import, and refactor `personas.py` to use it (behavior-preserving — its existing tests must still pass unchanged).
+
+**Files:**
+- Create: `backend/slugify.py`
+- Modify: `backend/personas.py` (import block ~lines 3-9; `_slugify`/`_unique_custom_id` ~lines 330-342)
+- Test: `backend/tests/test_slugify.py`
+
+**Interfaces:**
+- Produces: `slugify(name: str, *, fallback: str) -> str`, `unique_slug(name: str, existing_ids: Iterable[str], *, fallback: str) -> str`.
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+"""Unit tests for shared slug/id generation."""
+
+from backend.slugify import slugify, unique_slug
+
+
+def test_slugify_lowercases_and_hyphenates():
+    assert slugify("The Futurist", fallback="item") == "the-futurist"
+
+
+def test_slugify_strips_punctuation():
+    assert slugify("O'Brien!", fallback="item") == "o-brien"
+
+
+def test_slugify_blank_name_uses_fallback():
+    assert slugify("   ", fallback="item") == "item"
+
+
+def test_unique_slug_returns_base_slug_when_no_collision():
+    assert unique_slug("Sarah", [], fallback="item") == "sarah"
+
+
+def test_unique_slug_suffixes_on_collision():
+    assert unique_slug("Sarah", ["sarah"], fallback="item") == "sarah-2"
+
+
+def test_unique_slug_keeps_incrementing_past_multiple_collisions():
+    assert unique_slug("Sarah", ["sarah", "sarah-2", "sarah-3"], fallback="item") == "sarah-4"
+
+
+def test_unique_slug_blank_name_uses_fallback_then_suffixes():
+    assert unique_slug("", [], fallback="item") == "item"
+    assert unique_slug("", ["item"], fallback="item") == "item-2"
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `uv run pytest backend/tests/test_slugify.py -v`
+Expected: FAIL with `ModuleNotFoundError: No module named 'backend.slugify'`
+
+- [ ] **Step 3: Write the implementation**
+
+```python
+"""Shared slug/id generation for user-created entities (personas, profiles).
+
+A single, small, dependency-free helper so every "create a named thing and
+give it a stable id" feature doesn't reinvent slugification independently.
+"""
+
+import re
+from typing import Iterable
+
+
+def slugify(name: str, *, fallback: str) -> str:
+    """Lowercase, hyphenate, and strip a name down to a URL/id-safe slug."""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    return slug or fallback
+
+
+def unique_slug(name: str, existing_ids: Iterable[str], *, fallback: str) -> str:
+    """Slugify name, then suffix with -2, -3, ... until it doesn't collide."""
+    base_slug = slugify(name, fallback=fallback)
+    existing = set(existing_ids)
+    candidate = base_slug
+    suffix = 2
+    while candidate in existing:
+        candidate = f"{base_slug}-{suffix}"
+        suffix += 1
+    return candidate
+```
+
+- [ ] **Step 4: Run the new tests to verify they pass**
+
+Run: `uv run pytest backend/tests/test_slugify.py -v`
+Expected: all tests PASS
+
+- [ ] **Step 5: Refactor personas.py to use the shared helper**
+
+In `backend/personas.py`, replace the import block:
+
+```python
+import json
+import os
+import re
+import tempfile
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
+```
+
+with:
+
+```python
+import json
+import os
+import tempfile
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
+
+from .slugify import unique_slug
+```
+
+Then replace the `_slugify`/`_unique_custom_id` pair (around lines 330-342):
+
+```python
+def _slugify(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    return slug or "advisor"
+
+
+def _unique_custom_id(name: str, existing: Dict[str, Dict[str, Any]]) -> str:
+    base_slug = _slugify(name)
+    candidate = base_slug
+    suffix = 2
+    while candidate in _DEFAULT_MAP or candidate in existing:
+        candidate = f"{base_slug}-{suffix}"
+        suffix += 1
+    return candidate
+```
+
+with:
+
+```python
+def _unique_custom_id(name: str, existing: Dict[str, Dict[str, Any]]) -> str:
+    existing_ids = set(_DEFAULT_MAP.keys()) | set(existing.keys())
+    return unique_slug(name, existing_ids, fallback="advisor")
+```
+
+`_unique_custom_id` is still called exactly the same way from `create_persona` — only its internals changed, so no other line in `personas.py` needs to change.
+
+- [ ] **Step 6: Run the full persona test suite to confirm the refactor is behavior-preserving**
+
+Run: `uv run pytest backend/tests/test_personas.py -v`
+Expected: all tests PASS, unchanged from before the refactor (this file already has direct coverage for the id-collision behavior this step touches: id generation, collision-suffixing, and collision against the 12 built-in persona ids — the refactor must not change any of it)
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add backend/slugify.py backend/tests/test_slugify.py backend/personas.py
+git commit -m "refactor: extract shared slug/id helper, reuse it in personas.py"
+```
+
+---
+
+### Task 2: Backend — Profile model and CRUD store
 
 **Files:**
 - Create: `backend/profiles.py`
 - Test: `backend/tests/test_profiles.py`
 
 **Interfaces:**
+- Consumes: `unique_slug(name: str, existing_ids: Iterable[str], *, fallback: str) -> str` (Task 1).
 - Produces: `Profile` (Pydantic model: `id: str, name: str, avatar_emoji: str, color: str, created_at: str`), `get_all_profiles() -> List[Profile]`, `get_profile(profile_id: str) -> Optional[Profile]`, `create_profile(name: str, avatar_emoji: Optional[str] = None) -> Profile`, `delete_profile(profile_id: str) -> bool`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -157,13 +318,14 @@ docs/superpowers/specs/2026-08-27-multi-user-support-design.md.
 
 import json
 import os
-import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
+
+from .slugify import unique_slug
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 _PROFILES_FILE = _DATA_DIR / "profiles.json"
@@ -217,21 +379,6 @@ def _save_profiles(profiles: List[Dict[str, Any]]) -> None:
     _profiles_cache = profiles
 
 
-def _slugify(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
-    return slug or "profile"
-
-
-def _unique_id(name: str, existing_ids: set) -> str:
-    base_slug = _slugify(name)
-    candidate = base_slug
-    suffix = 2
-    while candidate in existing_ids:
-        candidate = f"{base_slug}-{suffix}"
-        suffix += 1
-    return candidate
-
-
 def get_all_profiles() -> List[Profile]:
     return [Profile(**p) for p in _load_profiles()]
 
@@ -246,7 +393,7 @@ def get_profile(profile_id: str) -> Optional[Profile]:
 def create_profile(name: str, avatar_emoji: Optional[str] = None) -> Profile:
     profiles = _load_profiles()
     existing_ids = {p["id"] for p in profiles}
-    profile_id = _unique_id(name, existing_ids)
+    profile_id = unique_slug(name, existing_ids, fallback="profile")
     color = _PROFILE_COLORS[len(profiles) % len(_PROFILE_COLORS)]
     record = {
         "id": profile_id,
@@ -283,7 +430,7 @@ git commit -m "feat: add Profile model and CRUD store for multi-user support"
 
 ---
 
-### Task 2: Backend — conversation storage gains optional profile scoping
+### Task 3: Backend — conversation storage gains optional profile scoping
 
 **Files:**
 - Modify: `backend/storage.py` (`_build_index_entry` ~line 249, `create_conversation` ~line 331, `get_conversation` ~line 363, `list_conversations` ~line 406, `delete_conversation` ~line 585; add two new functions)
@@ -641,7 +788,7 @@ git commit -m "feat: add optional profile_id scoping to conversation storage"
 
 ---
 
-### Task 3: Backend — wire profiles into the API
+### Task 4: Backend — wire profiles into the API
 
 **Files:**
 - Modify: `backend/main.py`
@@ -654,7 +801,7 @@ git commit -m "feat: add optional profile_id scoping to conversation storage"
 - Test: `backend/tests/test_profile_endpoints.py`
 
 **Interfaces:**
-- Consumes: `Profile`, `get_all_profiles`, `get_profile`, `create_profile`, `delete_profile` (Task 1); `storage.create_conversation/get_conversation/list_conversations/delete_conversation/get_unclaimed_conversation_count/claim_unclaimed_conversations` (Task 2).
+- Consumes: `Profile`, `get_all_profiles`, `get_profile`, `create_profile`, `delete_profile` (Task 2); `storage.create_conversation/get_conversation/list_conversations/delete_conversation/get_unclaimed_conversation_count/claim_unclaimed_conversations` (Task 3).
 - Produces: `get_active_profile_id(x_profile_id: Optional[str] = Header(None)) -> Optional[str]` FastAPI dependency, reusable by any future conversation-scoped endpoint.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1026,7 +1173,7 @@ git commit -m "feat: wire profile-scoped access into conversation API endpoints"
 
 ---
 
-### Task 4: Frontend — active-profile session helper and API header injection
+### Task 5: Frontend — active-profile session helper and API header injection
 
 **Files:**
 - Create: `frontend/src/profileSession.js`
@@ -1272,14 +1419,14 @@ git commit -m "feat: add profile session helper and wire X-Profile-Id into api.j
 
 ---
 
-### Task 5: Frontend — ProfilePicker component
+### Task 6: Frontend — ProfilePicker component
 
 **Files:**
 - Create: `frontend/src/components/ProfilePicker.jsx`
 - Create: `frontend/src/components/ProfilePicker.css`
 
 **Interfaces:**
-- Consumes: `api.getProfiles`, `api.createProfile`, `api.claimUnclaimedConversations`, `api.getUnclaimedConversationsSummary` (Task 4).
+- Consumes: `api.getProfiles`, `api.createProfile`, `api.claimUnclaimedConversations`, `api.getUnclaimedConversationsSummary` (Task 5).
 - Produces: `<ProfilePicker onProfileChosen={(profile) => void} />` — `profile` is the full `{id, name, avatar_emoji, color, created_at}` object from the API.
 
 - [ ] **Step 1: Create the component**
@@ -1565,7 +1712,7 @@ export default function ProfilePicker({ onProfileChosen }) {
 Run: `cd frontend && npm run lint`
 Expected: no new errors in `ProfilePicker.jsx`.
 
-Since `ProfilePicker` isn't mounted anywhere yet (that's Task 6), this component can't be manually exercised in the browser until Task 6 wires it in — full manual verification happens there.
+Since `ProfilePicker` isn't mounted anywhere yet (that's Task 7), this component can't be manually exercised in the browser until Task 7 wires it in — full manual verification happens there.
 
 - [ ] **Step 4: Commit**
 
@@ -1576,7 +1723,7 @@ git commit -m "feat: add ProfilePicker component"
 
 ---
 
-### Task 6: Frontend — gate the app behind the picker, wire switch/delete into Sidebar
+### Task 7: Frontend — gate the app behind the picker, wire switch/delete into Sidebar
 
 **Files:**
 - Create: `frontend/src/components/ProfileGate.jsx`
@@ -1586,7 +1733,7 @@ git commit -m "feat: add ProfilePicker component"
 - Modify: `frontend/src/components/Sidebar.css` (new `.sidebar-profile*` rules)
 
 **Interfaces:**
-- Consumes: `ProfilePicker` (Task 5); `getActiveProfileId`, `setActiveProfileId`, `clearActiveProfileId` (Task 4); `api.getProfiles`, `api.deleteProfile` (Task 4).
+- Consumes: `ProfilePicker` (Task 6); `getActiveProfileId`, `setActiveProfileId`, `clearActiveProfileId` (Task 5); `api.getProfiles`, `api.deleteProfile` (Task 5).
 - Produces: `App` now accepts `{ activeProfile, onSwitchProfile }` props (both required at the call site in `main.jsx`).
 
 - [ ] **Step 1: Create `ProfileGate.jsx`**
@@ -1894,7 +2041,7 @@ git commit -m "feat: gate the app behind a profile picker, add switch/delete con
 
 ---
 
-### Task 7: Documentation sync
+### Task 8: Documentation sync
 
 **Files:**
 - Modify: `README.md` (Additional Features bullet list, ~line 254)

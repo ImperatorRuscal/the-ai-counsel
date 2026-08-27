@@ -37,7 +37,7 @@ class Profile(BaseModel):
     created_at: str     # ISO 8601
 ```
 
-Stored as a flat list in `data/profiles.json`. Implement slugify + collision-suffix id generation directly in `backend/profiles.py`, as its own small self-contained helper, rather than importing `backend/personas.py`'s equivalent (`_slugify`/`_unique_custom_id`, added by the now-merged `feat/add-advisors` work). Those are underscore-prefixed internals of the persona module, not a published shared API — duplicating ~15 lines here is preferable to coupling this feature's correctness to another feature's private implementation details.
+Stored as a flat list in `data/profiles.json`. Id generation reuses a shared `backend/slugify.py` helper (`slugify`/`unique_slug`), extracted from `backend/personas.py`'s equivalent private logic (`_slugify`/`_unique_custom_id`, added by the now-merged `feat/add-advisors` work) rather than duplicated — `personas.py` is refactored to use the same shared module, as a small behavior-preserving side effect of this feature.
 
 ### Conversation isolation
 
