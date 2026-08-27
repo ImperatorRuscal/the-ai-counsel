@@ -106,3 +106,21 @@ def test_delete_profile_only_removes_target():
     remaining = get_all_profiles()
     assert len(remaining) == 1
     assert remaining[0].id == second.id
+
+
+def test_load_profiles_invalid_json_logs_warning_and_returns_empty_list(caplog):
+    """Verify that corrupted JSON in profiles.json is logged and falls back to empty list."""
+    profiles_file = profiles_module._PROFILES_FILE
+    # Write invalid JSON to the file
+    profiles_file.write_text("{invalid json", encoding="utf-8")
+    # Reset the cache to force a reload
+    profiles_module._profiles_cache = None
+    # Load profiles—should fail gracefully
+    result = get_all_profiles()
+    # Should return empty list without raising
+    assert result == []
+    # Should have logged a warning
+    assert any(
+        record.levelname == "WARNING" and "Failed to parse" in record.message
+        for record in caplog.records
+    )

@@ -6,6 +6,7 @@ docs/superpowers/specs/2026-08-27-multi-user-support-design.md.
 """
 
 import json
+import logging
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -15,6 +16,8 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 from .slugify import unique_slug
+
+logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 _PROFILES_FILE = _DATA_DIR / "profiles.json"
@@ -50,6 +53,7 @@ def _load_profiles() -> List[Dict[str, Any]]:
     try:
         _profiles_cache = json.loads(_PROFILES_FILE.read_text(encoding="utf-8"))
     except Exception:
+        logger.warning("Failed to parse %s; starting with an empty profile list", _PROFILES_FILE, exc_info=True)
         _profiles_cache = []
     return _profiles_cache
 
