@@ -3,7 +3,7 @@
 import base64
 import binascii
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -56,6 +56,7 @@ from .personas import (
     update_custom_persona,
     delete_persona,
 )
+from .profiles import get_all_profiles, get_profile, create_profile, delete_profile
 from .advisors import run_debate
 from .debate import run_iterative_debate, MAX_DEBATE_ROUNDS
 from .documents import (
@@ -310,6 +311,19 @@ def _forwarded_client_hosts(request: Request) -> List[str]:
     return hosts
 
 
+def get_active_profile_id(x_profile_id: Optional[str] = Header(None)) -> Optional[str]:
+    """Optional caller identity for conversation-scoped endpoints.
+
+    Absent header => unscoped, identical to pre-multi-user behavior. This
+    is required for the_ai_counsel_mcp and any direct API/script caller,
+    which have no concept of a profile and must keep working unmodified.
+    Present header must reference a real profile.
+    """
+    if x_profile_id and not get_profile(x_profile_id):
+        raise HTTPException(status_code=400, detail="Unknown profile")
+    return x_profile_id
+
+
 def _require_admin(request: Request) -> None:
     """Auth guard for endpoints that read or rewrite stored credentials."""
     if _ADMIN_TOKEN:
@@ -399,6 +413,7 @@ class AskRequest(BaseModel):
     web_search: bool = False
     execution_mode: ExecutionMode = "chat_only"
     documents: Optional[List[Dict[str, Any]]] = None
+    profile_id: Optional[str] = None
 
 
 class DocumentExtractJsonRequest(BaseModel):
@@ -661,40 +676,102 @@ async def root():
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
-async def list_conversations():
-    """List all conversations (metadata only)."""
-    return storage.list_conversations()
+async def list_conversations(profile_id: Optional[str] = Depends(get_active_profile_id)):
+    """List all conversations (metadata only). Scoped to profile_id when the caller sends one."""
+    return storage.list_conversations(profile_id)
 
 
 @app.post("/api/conversations", response_model=Conversation)
-async def create_conversation(request: CreateConversationRequest):
+async def create_conversation(
+    request: CreateConversationRequest,
+    profile_id: Optional[str] = Depends(get_active_profile_id),
+):
     """Create a new conversation."""
     conversation_id = str(uuid.uuid4())
-    conversation = storage.create_conversation(conversation_id, mode=request.mode)
+    conversation = storage.create_conversation(conversation_id, mode=request.mode, profile_id=profile_id)
     return conversation
 
 
+class ProfileCreateRequest(BaseModel):
+    name: str
+    avatar_emoji: Optional[str] = None
+
+
+@app.get("/api/profiles")
+async def list_profiles():
+    """List all profiles. No auth — this is how the picker discovers who can be chosen."""
+    return [p.model_dump() for p in get_all_profiles()]
+
+
+@app.post("/api/profiles")
+async def add_profile(body: ProfileCreateRequest):
+    """Create a new profile. Self-service — no gate on who can create one."""
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    created = create_profile(body.name.strip(), body.avatar_emoji)
+    return created.model_dump()
+
+
+@app.delete("/api/profiles/{profile_id}")
+async def remove_profile(profile_id: str, x_profile_id: Optional[str] = Header(None)):
+    """Delete a profile and its private conversations. A profile can only delete itself."""
+    if x_profile_id != profile_id:
+        raise HTTPException(status_code=403, detail="Can only delete your own profile")
+    if not get_profile(profile_id):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    for entry in storage.list_conversations(profile_id):
+        storage.delete_conversation(entry["id"], profile_id)
+    delete_profile(profile_id)
+    return {"deleted": profile_id}
+
+
+@app.get("/api/conversations/unclaimed-summary")
+async def unclaimed_conversations_summary():
+    """Count of conversations with no owning profile, for the picker's import prompt."""
+    return {"count": storage.get_unclaimed_conversation_count()}
+
+
+@app.post("/api/profiles/{profile_id}/claim-unclaimed")
+async def claim_unclaimed(profile_id: str):
+    """Attach every currently-unclaimed conversation to profile_id. Idempotent."""
+    if not get_profile(profile_id):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    claimed = storage.claim_unclaimed_conversations(profile_id)
+    return {"claimed": claimed}
+
+
 @app.get("/api/conversations/{conversation_id}", response_model=Conversation)
-async def get_conversation(conversation_id: str):
+async def get_conversation(
+    conversation_id: str,
+    profile_id: Optional[str] = Depends(get_active_profile_id),
+):
     """Get a specific conversation with all its messages."""
-    conversation = storage.get_conversation(conversation_id)
+    conversation = storage.get_conversation(conversation_id, profile_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
 
 
 @app.delete("/api/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: str):
+async def delete_conversation(
+    conversation_id: str,
+    profile_id: Optional[str] = Depends(get_active_profile_id),
+):
     """Delete a conversation."""
-    deleted = storage.delete_conversation(conversation_id)
+    deleted = storage.delete_conversation(conversation_id, profile_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return {"status": "deleted"}
 
 
 @app.get("/api/conversations/{conversation_id}/progress")
-async def get_conversation_progress(conversation_id: str):
+async def get_conversation_progress(
+    conversation_id: str,
+    profile_id: Optional[str] = Depends(get_active_profile_id),
+):
     """Return live progress for an active streaming run, or {active: false} if none."""
+    if profile_id is not None and storage.get_conversation(conversation_id, profile_id) is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     run = _active_runs.get(conversation_id)
     if run is None:
         return {"active": False}
@@ -736,9 +813,14 @@ async def get_conversation_progress(conversation_id: str):
 
 
 @app.post("/api/conversations/{conversation_id}/message/stream")
-async def send_message_stream(conversation_id: str, body: SendMessageRequest, request: Request):
+async def send_message_stream(
+    conversation_id: str,
+    body: SendMessageRequest,
+    request: Request,
+    profile_id: Optional[str] = Depends(get_active_profile_id),
+):
     """Send a message and stream the 3-stage council process."""
-    conversation = storage.get_conversation(conversation_id)
+    conversation = storage.get_conversation(conversation_id, profile_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -963,9 +1045,14 @@ async def send_message_stream(conversation_id: str, body: SendMessageRequest, re
 
 
 @app.post("/api/conversations/{conversation_id}/message/debate")
-async def send_debate_message_stream(conversation_id: str, body: SendMessageRequest, request: Request):
+async def send_debate_message_stream(
+    conversation_id: str,
+    body: SendMessageRequest,
+    request: Request,
+    profile_id: Optional[str] = Depends(get_active_profile_id),
+):
     """Send a message and stream the multi-round iterative debate process."""
-    conversation = storage.get_conversation(conversation_id)
+    conversation = storage.get_conversation(conversation_id, profile_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -1269,9 +1356,14 @@ async def remove_persona(persona_id: str):
 
 
 @app.post("/api/conversations/{conversation_id}/debate/stream")
-async def start_debate_stream(conversation_id: str, body: StartDebateRequest, request: Request):
+async def start_debate_stream(
+    conversation_id: str,
+    body: StartDebateRequest,
+    request: Request,
+    profile_id: Optional[str] = Depends(get_active_profile_id),
+):
     """Start an advisor debate and stream results via SSE."""
-    conversation = storage.get_conversation(conversation_id)
+    conversation = storage.get_conversation(conversation_id, profile_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -1403,9 +1495,13 @@ async def start_debate_stream(conversation_id: str, body: StartDebateRequest, re
 
 
 @app.post("/api/conversations/{conversation_id}/message")
-async def send_message_sync(conversation_id: str, body: SendMessageRequest):
+async def send_message_sync(
+    conversation_id: str,
+    body: SendMessageRequest,
+    profile_id: Optional[str] = Depends(get_active_profile_id),
+):
     """Send a message and return JSON response (non-streaming)."""
-    conversation = storage.get_conversation(conversation_id)
+    conversation = storage.get_conversation(conversation_id, profile_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -1500,7 +1596,7 @@ async def ask_oneshot(body: AskRequest):
     )
 
     conversation_id = str(uuid.uuid4())
-    conversation = storage.create_conversation(conversation_id)
+    conversation = storage.create_conversation(conversation_id, profile_id=body.profile_id)
     conversation["title"] = storage.derive_conversation_title(body.content)
     storage.add_user_message(
         conversation_id,
